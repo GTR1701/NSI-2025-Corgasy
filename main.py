@@ -5,10 +5,10 @@ from base_bot import BaseBot
 
 def load_participant_bot():
     """
-    Ładuje bota uczestnika z pliku solution.py.
+    Ładuje bota uczestnika z pliku solutionH.py.
     """
     try:
-        from solution import create_bot
+        from solutionH import create_bot
 
         bot_instance = create_bot()
 
@@ -22,7 +22,7 @@ def load_participant_bot():
         print(f"Bot załadowany: {bot_instance.__class__.__name__}")
         return bot_instance
     except ImportError as e:
-        print("BŁĄD: Nie znaleziono funkcji 'create_bot()' w solution.py")
+        print("BŁĄD: Nie znaleziono funkcji 'create_bot()' w solutionH.py")
         print(f"Szczegóły: {e}")
         print("Utwórz funkcję create_bot() która zwraca instancję Twojej klasy bota.")
         sys.exit(1)
@@ -30,10 +30,10 @@ def load_participant_bot():
 
 def load_calculate_reward():
     """
-    Ładuje funkcję calculate_reward z pliku solution.py.
+    Ładuje funkcję calculate_reward z pliku solutionH.py.
     """
     try:
-        from solution import calculate_reward
+        from solutionH import calculate_reward
 
         if not callable(calculate_reward):
             raise TypeError("calculate_reward musi być funkcją.")
@@ -41,7 +41,7 @@ def load_calculate_reward():
         print("Funkcja calculate_reward załadowana.")
         return calculate_reward
     except ImportError as e:
-        print("BŁĄD: Nie znaleziono funkcji 'calculate_reward()' w solution.py")
+        print("BŁĄD: Nie znaleziono funkcji 'calculate_reward()' w solutionH.py")
         print(f"Szczegóły: {e}")
         print(
             "Utwórz funkcję calculate_reward(game_state: dict) która zwraca wartość nagrody (float)."
@@ -53,23 +53,23 @@ if __name__ == "__main__":
     try:
         participant_bot = load_participant_bot()
         try:
-            from solution import train_bot
+            from solutionH import train_bot
             train_bot()
         except ImportError:
             def train_bot(bot: BaseBot, episodes: int):
-                """Domyślna funkcja treningowa, jeśli nie jest zdefiniowana w solution.py."""
-                print("Funkcja train_bot() nie została zdefiniowana w solution.py.")
+                """Domyślna funkcja treningowa, jeśli nie jest zdefiniowana w solutionH.py."""
+                print("Funkcja train_bot() nie została zdefiniowana w solutionH.py.")
                 print("Używana jest domyślna funkcja treningowa (brak treningu).")
                 return
         # Załaduj bota uczestnika
 
         # Wczytaj opcjonalne ustawienia turnieju
         try:
-            from solution import BENCHMARK_EPISODES
+            from solutionH import BENCHMARK_EPISODES
         except ImportError:
             BENCHMARK_EPISODES = 50
         try:
-            from solution import WATCH_GAME
+            from solutionH import WATCH_GAME
         except ImportError:
             WATCH_GAME = True
         # Uruchom turniej
