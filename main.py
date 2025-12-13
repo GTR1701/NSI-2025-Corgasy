@@ -8,7 +8,7 @@ def load_participant_bot():
     Ładuje bota uczestnika z pliku solution.py.
     """
     try:
-        from solution import create_bot
+        from solutionBad import create_bot
 
         bot_instance = create_bot()
 
@@ -33,7 +33,7 @@ def load_calculate_reward():
     Ładuje funkcję calculate_reward z pliku solution.py.
     """
     try:
-        from solution import calculate_reward
+        from solutionBad import calculate_reward
 
         if not callable(calculate_reward):
             raise TypeError("calculate_reward musi być funkcją.")
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     try:
         participant_bot = load_participant_bot()
         try:
-            from solution import train_bot
+            from solutionBad import train_bot
             train_bot()
         except ImportError:
             def train_bot(bot: BaseBot, episodes: int):
@@ -65,11 +65,11 @@ if __name__ == "__main__":
 
         # Wczytaj opcjonalne ustawienia turnieju
         try:
-            from solution import BENCHMARK_EPISODES
+            from solutionBad import BENCHMARK_EPISODES
         except ImportError:
             BENCHMARK_EPISODES = 50
         try:
-            from solution import WATCH_GAME
+            from solutionBad import WATCH_GAME
         except ImportError:
             WATCH_GAME = True
         # Uruchom turniej
