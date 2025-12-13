@@ -16,7 +16,7 @@ import torch.nn.functional as F
 
 from src.env import GameEnv
 
-
+# region Ustawienia i stałe
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Opcjonalne stałe konfiguracyjne
@@ -33,52 +33,34 @@ WATCH_GAME = True        # Czy wyświetlić wizualizację po benchmarku
 
 BATCH_SIZE = 128
 GAMMA = 0.99
-EPS_START = 0.9
-EPS_END = 0.01
-EPS_DECAY = 2500
+EPS_START = 0.95  # Start with more exploration
+EPS_END = 0.02   # Keep some exploration
+EPS_DECAY = 5000  # Slower decay for better spike learning
 TAU = 0.005
-LR = 3e-4
+LR = 1e-4  # Lower learning rate for stability
 
+# endregion
 
-# def plot_durations(show_result=False):
-#     plt.figure(1)
-#     durations_t = torch.tensor(episode_durations, dtype=torch.float)
-#     if show_result:
-#         plt.title('Result')
-#     else:
-#         plt.clf()
-#         plt.title('Training...')
-#     plt.xlabel('Episode')
-#     plt.ylabel('Duration')
-#     plt.plot(durations_t.numpy())
-#     # Take 100 episode averages and plot them too
-#     if len(durations_t) >= 100:
-#         means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
-#         means = torch.cat((torch.zeros(99), means))
-#         plt.plot(means.numpy())
-
-#     plt.pause(0.001)  # pause a bit so that plots are updated
-#     if is_ipython:
-#         if not show_result:
-#             display.display(plt.gcf())
-#             display.clear_output(wait=True)
-#         else:
-#             display.display(plt.gcf())
-
+# region Sieć neuronowa DQN
 class DQN(nn.Module):
-
     def __init__(self, n_observations, n_actions):
         super(DQN, self).__init__()
-        self.layer1 = nn.Linear(n_observations, 128)
-        self.layer2 = nn.Linear(128, 128)
-        self.layer3 = nn.Linear(128, n_actions)
+        # Larger network for better spike pattern recognition
+        self.layer1 = nn.Linear(n_observations, 256)
+        self.layer2 = nn.Linear(256, 256)
+        self.layer3 = nn.Linear(256, 128)
+        self.layer4 = nn.Linear(128, n_actions)
+        
+        # Dropout for better generalization
+        self.dropout = nn.Dropout(0.1)
 
-    # Called with either one element to determine next action, or a batch
-    # during optimization. Returns tensor([[left0exp,right0exp]...]).
     def forward(self, x):
         x = F.relu(self.layer1(x))
+        x = self.dropout(x)
         x = F.relu(self.layer2(x))
-        return self.layer3(x)
+        x = self.dropout(x)
+        x = F.relu(self.layer3(x))
+        return self.layer4(x)
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
@@ -98,7 +80,99 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
-env = GameEnv()
+
+def optimize_model():
+    if len(memory) < BATCH_SIZE:
+        return
+    transitions = memory.sample(BATCH_SIZE)
+    batch = Transition(*zip(*transitions))
+
+    non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
+                                          batch.next_state)), device=device, dtype=torch.bool)
+    non_final_next_states = torch.cat([s for s in batch.next_state
+                                                if s is not None])
+    state_batch = torch.cat(batch.state)
+    action_batch = torch.cat(batch.action)
+    reward_batch = torch.cat(batch.reward)
+
+    state_action_values = policy_net(state_batch).gather(1, action_batch)
+
+    next_state_values = torch.zeros(BATCH_SIZE, device=device)
+    with torch.no_grad():
+        next_state_values[non_final_mask] = target_net(non_final_next_states).max(1).values
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+    # Compute Huber loss
+    criterion = nn.SmoothL1Loss()
+    loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+
+
+    spike_weight = 1.5
+    weighted_loss = spike_weight * loss
+
+    # Optimize the model
+    optimizer.zero_grad()
+    weighted_loss.backward()
+    # In-place gradient clipping
+    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
+    optimizer.step()
+
+def calculate_reward(game_state: dict) -> float:
+    """
+    Funkcja obliczająca nagrodę na podstawie stanu gry.
+    Wywoływana na każdym kroku gry oraz po zakończeniu gry.
+    
+    Args:
+        game_state: słownik zawierający informacje o stanie gry
+        
+    Returns:
+        float: wartość nagrody
+    """
+    reward = 0.0
+    
+    # Check if player died (hit spikes)
+    if game_state.get('player_dead', False):
+        return -100.0  # Heavy penalty for dying
+    
+    # Base survival reward
+    reward += 1.0
+    
+    # Reward for score increase (successful wall bounces)
+    score = game_state.get('score', 0)
+    if hasattr(calculate_reward, 'last_score'):
+        if score > calculate_reward.last_score:
+            reward += 20.0  # Reward for progress
+    calculate_reward.last_score = score
+    
+    # Reward for coin collection
+    coins = game_state.get('collected_coins', 0)
+    if hasattr(calculate_reward, 'last_coins'):
+        if coins > calculate_reward.last_coins:
+            reward += 50.0  # Big reward for coins
+    calculate_reward.last_coins = coins
+    
+    # Penalty for being close to spikes using original engine data
+    player_y = game_state.get('player_pos_y', 0)
+    spikes = game_state.get('spikes_pos_y', [])
+    
+    min_distance = float('inf')
+    for spike_y in spikes:
+        if isinstance(spike_y, (int, float)) and spike_y >= 0:
+            distance = abs(player_y - spike_y)
+            min_distance = min(min_distance, distance)
+    
+    # Apply distance-based penalty
+    if min_distance < 30:
+        reward -= 5.0  # Close to spike
+    elif min_distance < 50:
+        reward -= 2.0  # Moderately close
+    elif min_distance < 80:
+        reward -= 0.5  # Slightly close
+    
+    return reward
+
+
+env = GameEnv(calculate_reward=calculate_reward)
 
 # Get number of actions from gym action space
 n_actions = env.action_space.n
@@ -118,6 +192,9 @@ steps_done = 0
 
 
 episode_durations = []
+
+# endregion
+# region Bot
 
 class MojBot(BaseBot):
     """
@@ -144,19 +221,105 @@ class MojBot(BaseBot):
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
             math.exp(-1. * steps_done / EPS_DECAY)
         steps_done += 1
+
+        # Extract key information from observation
+        player_x, player_y = obs[0], obs[1]
+        player_velocity_dir = obs[2]  # 1 if moving right, -1 if left
+        player_gravity = obs[3]
+        coin_x, coin_y = obs[4], obs[5]
+        spike_positions = obs[6:15]  # Last 9 values are spike positions
+        
+        # Enhanced observation processing with intelligent spike emphasis
+        obs_enhanced = self._create_enhanced_observation(obs, player_y, spike_positions)
+        
         if sample > eps_threshold:
+            # Use neural network for action selection
             with torch.no_grad():
-                # Convert obs to tensor if it's numpy array
-                if isinstance(obs, np.ndarray):
-                    state_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-                else:
-                    # obs is already a tensor
-                    state_tensor = obs
+                state_tensor = torch.tensor(obs_enhanced, dtype=torch.float32, device=device).unsqueeze(0)
                 action = policy_net(state_tensor).max(1)[1].item()
                 return action
         else:
-            return env.action_space.sample()
+            # Intelligent exploration - avoid obvious spike dangers
+            return self._intelligent_exploration(player_y, spike_positions, player_gravity)
+    
+    def _create_enhanced_observation(self, obs, player_y, spike_positions):
+        """Create enhanced observation with intelligent spike danger analysis"""
+        obs_enhanced = obs.copy()
+        
+        # Analyze each spike position and apply dynamic scaling
+        for i, spike_y in enumerate(spike_positions):
+            if spike_y >= 0:  # Valid spike position
+                distance = abs(player_y - spike_y)
+                
+                if distance < 25:  # Immediate danger zone
+                    obs_enhanced[6 + i] = spike_y * 15.0  # Maximum emphasis
+                elif distance < 50:  # High danger zone
+                    obs_enhanced[6 + i] = spike_y * 10.0  # High emphasis
+                elif distance < 80:  # Moderate danger zone
+                    obs_enhanced[6 + i] = spike_y * 6.0   # Medium emphasis
+                elif distance < 120:  # Awareness zone
+                    obs_enhanced[6 + i] = spike_y * 3.0   # Low emphasis
+                else:  # Distant spikes
+                    obs_enhanced[6 + i] = spike_y * 1.5   # Minimal emphasis
+            # Keep -1 values unchanged for empty spike slots
+        
+        return obs_enhanced
+    
+    def _intelligent_exploration(self, player_y, spike_positions, gravity):
+        """Smart exploration that actively avoids spike dangers"""
+        # Calculate danger scores for different actions
+        current_danger = self._calculate_danger_score(player_y, spike_positions)
+        
+        # Estimate position after jump (player typically moves up 15-25 pixels)
+        jump_y_estimate = player_y - 20
+        jump_danger = self._calculate_danger_score(jump_y_estimate, spike_positions)
+        
+        # Estimate position after falling (gravity effect)
+        fall_y_estimate = player_y + abs(gravity) * 2
+        fall_danger = self._calculate_danger_score(fall_y_estimate, spike_positions)
+        
+        # Decision making based on danger levels
+        if current_danger > 10:  # Critical danger
+            # Emergency mode - choose safest option immediately
+            return 1 if jump_danger < fall_danger else 0
+        elif current_danger > 5:  # High danger
+            # Bias heavily towards safer action
+            safer_action = 1 if jump_danger < fall_danger else 0
+            return safer_action if random.random() < 0.85 else (1 - safer_action)
+        elif current_danger > 2:  # Moderate danger
+            # Bias towards safer action but allow some variation
+            safer_action = 1 if jump_danger < fall_danger else 0
+            return safer_action if random.random() < 0.7 else (1 - safer_action)
+        else:  # Low danger
+            # More random exploration when relatively safe
+            return random.choice([0, 1])
+    
+    def _calculate_danger_score(self, y_position, spike_positions):
+        """Calculate comprehensive danger score for a position"""
+        danger_score = 0
+        
+        for spike_y in spike_positions:
+            if spike_y >= 0:  # Valid spike
+                distance = abs(y_position - spike_y)
+                
+                # Progressive danger scoring based on distance
+                if distance < 15:
+                    danger_score += 25  # Extreme danger
+                elif distance < 30:
+                    danger_score += 15  # Very high danger
+                elif distance < 50:
+                    danger_score += 8   # High danger
+                elif distance < 80:
+                    danger_score += 4   # Moderate danger
+                elif distance < 120:
+                    danger_score += 2   # Low danger
+                elif distance < 160:
+                    danger_score += 1   # Minimal danger
+        
+        return danger_score
 
+# endregion
+# region Funkcje wymagane
 
 def create_bot() -> BaseBot:
     """
@@ -168,89 +331,38 @@ def create_bot() -> BaseBot:
     return MojBot()
 
 
-def calculate_reward(game_state: dict) -> float:
-    """
-    Funkcja obliczająca nagrodę na podstawie stanu gry.
-    Wywoływana na każdym kroku gry oraz po zakończeniu gry.
-    
-    Args:
-        game_state: słownik zawierający informacje o stanie gry
-        
-    Returns:
-        float: wartość nagrody
-    """
-    # Implementacja funkcji nagrody
-    pass
-
-def optimize_model():
-    if len(memory) < BATCH_SIZE:
-        return
-    transitions = memory.sample(BATCH_SIZE)
-    # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
-    # detailed explanation). This converts batch-array of Transitions
-    # to Transition of batch-arrays.
-    batch = Transition(*zip(*transitions))
-
-    # Compute a mask of non-final states and concatenate the batch elements
-    # (a final state would've been the one after which simulation ended)
-    non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
-                                          batch.next_state)), device=device, dtype=torch.bool)
-    non_final_next_states = torch.cat([s for s in batch.next_state
-                                                if s is not None])
-    state_batch = torch.cat(batch.state)
-    action_batch = torch.cat(batch.action)
-    reward_batch = torch.cat(batch.reward)
-
-    # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
-    # columns of actions taken. These are the actions which would've been taken
-    # for each batch state according to policy_net
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
-
-    # Compute V(s_{t+1}) for all next states.
-    # Expected values of actions for non_final_next_states are computed based
-    # on the "older" target_net; selecting their best reward with max(1).values
-    # This is merged based on the mask, such that we'll have either the expected
-    # state value or 0 in case the state was final.
-    next_state_values = torch.zeros(BATCH_SIZE, device=device)
-    with torch.no_grad():
-        next_state_values[non_final_mask] = target_net(non_final_next_states).max(1).values
-    # Compute the expected Q values
-    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-
-    # Compute Huber loss
-    criterion = nn.SmoothL1Loss()
-    loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
-
-    # Optimize the model
-    optimizer.zero_grad()
-    loss.backward()
-    # In-place gradient clipping
-    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
-    optimizer.step()
-
 def create_bot() -> BaseBot:
     return MojBot()
 
+# region Trening bota
+
 def train_bot():
     if torch.cuda.is_available():
-        num_episodes = 1200
+        num_episodes = 1500  # More episodes for complex spike patterns
       
     else:
-        num_episodes = 50
-
+        num_episodes = 100
+    
+    # Reset reward function tracking
+    calculate_reward.last_score = 0
+    calculate_reward.last_coins = 0
 
     for i_episode in range(num_episodes):
         # Initialize the environment and get its state
         state, info = env.reset()
+        
         state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
         bot = MojBot()
         for t in count():
             # Convert tensor state to numpy for take_action
             state_np = state.cpu().numpy().squeeze()
             action = bot.take_action(state_np)
+
             observation, reward, terminated, truncated, _ = env.step(action)
             reward = torch.tensor([reward], device=device)
             done = terminated or truncated
+
+
 
             if terminated:
                 next_state = None
