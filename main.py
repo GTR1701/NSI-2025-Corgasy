@@ -51,8 +51,17 @@ def load_calculate_reward():
 
 if __name__ == "__main__":
     try:
-        # Załaduj bota uczestnika
         participant_bot = load_participant_bot()
+        try:
+            from solution import train_bot
+            train_bot(episodes=5000)
+        except ImportError:
+            def train_bot(bot: BaseBot, episodes: int):
+                """Domyślna funkcja treningowa, jeśli nie jest zdefiniowana w solution.py."""
+                print("Funkcja train_bot() nie została zdefiniowana w solution.py.")
+                print("Używana jest domyślna funkcja treningowa (brak treningu).")
+                return
+        # Załaduj bota uczestnika
 
         # Wczytaj opcjonalne ustawienia turnieju
         try:
@@ -62,7 +71,7 @@ if __name__ == "__main__":
         try:
             from solution import WATCH_GAME
         except ImportError:
-            WATCH_GAME = True
+            WATCH_GAME = False
         # Uruchom turniej
         calculate_reward = load_calculate_reward()
         tournament = Tournament(calculate_reward, participant_bot)
