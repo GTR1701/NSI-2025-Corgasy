@@ -148,6 +148,7 @@ class GameEngine:
         self.west_spikes = []
         self.coin_list = []
         self.score = 0
+        self.coin_total = 0
         self.game_over = False
 
         return self.get_state_dict()
