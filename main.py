@@ -54,7 +54,7 @@ if __name__ == "__main__":
         participant_bot = load_participant_bot()
         try:
             from solution import train_bot
-            train_bot(episodes=5000)
+            train_bot()
         except ImportError:
             def train_bot(bot: BaseBot, episodes: int):
                 """Domyślna funkcja treningowa, jeśli nie jest zdefiniowana w solution.py."""
@@ -71,7 +71,7 @@ if __name__ == "__main__":
         try:
             from solution import WATCH_GAME
         except ImportError:
-            WATCH_GAME = False
+            WATCH_GAME = True
         # Uruchom turniej
         calculate_reward = load_calculate_reward()
         tournament = Tournament(calculate_reward, participant_bot)
