@@ -1,8 +1,9 @@
 from base_bot import BaseBot
 import numpy as np
 
-BENCHMARK_EPISODES = 500
+BENCHMARK_EPISODES = 50
 WATCH_GAME = True
+COIN_HISTORY = []
 
 class MojBot(BaseBot):
     def __init__(self):
@@ -118,7 +119,15 @@ def create_bot() -> BaseBot:
     return MojBot()
 
 def calculate_reward(game_state: dict) -> float:
-    if game_state["player_dead"]: return -10.0
+    if game_state["player_dead"]:
+        COIN_HISTORY.append(game_state["collected_coins"])
+        
+        if len(COIN_HISTORY) == BENCHMARK_EPISODES:
+            avg_coins = sum(COIN_HISTORY) / len(COIN_HISTORY)
+            print(f"Avg coins: {avg_coins:.2f}")
+            
+        return -10.0
+
     return 1.0 + game_state["collected_coins"] * 5.0
 
 def train_bot():
