@@ -52,15 +52,15 @@ def load_calculate_reward():
 if __name__ == "__main__":
     try:
         participant_bot = load_participant_bot()
-        try:
-            from solutionH import train_bot
-            train_bot()
-        except ImportError:
-            def train_bot(bot: BaseBot, episodes: int):
-                """Domyślna funkcja treningowa, jeśli nie jest zdefiniowana w solutionH.py."""
-                print("Funkcja train_bot() nie została zdefiniowana w solutionH.py.")
-                print("Używana jest domyślna funkcja treningowa (brak treningu).")
-                return
+        # try:
+        #     from solutionH import train_bot
+        #     train_bot()
+        # except ImportError:
+        #     def train_bot(bot: BaseBot, episodes: int):
+        #         """Domyślna funkcja treningowa, jeśli nie jest zdefiniowana w solutionH.py."""
+        #         print("Funkcja train_bot() nie została zdefiniowana w solutionH.py.")
+        #         print("Używana jest domyślna funkcja treningowa (brak treningu).")
+        #         return
         # Załaduj bota uczestnika
 
         # Wczytaj opcjonalne ustawienia turnieju
